@@ -8,6 +8,14 @@ on:
     - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
+      preview:
+        description: "Post a formatting preview to Discord instead of checking for new announcements"
+        type: choice
+        options:
+          - "off"
+          - sample
+          - latest
+        default: "off"
       dry_run:
         description: "List what would be posted without posting it"
         type: boolean
@@ -36,10 +44,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -60,6 +68,7 @@ jobs:
           # Who gets pinged: "<@your-user-id>" for now, "@everyone" later.
           DISCORD_MENTION: ${{ secrets.DISCORD_MENTION || vars.DISCORD_MENTION }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || vars.LOOKBACK_DAYS || '7' }}
+          PREVIEW: ${{ inputs.preview }}
           DRY_RUN: ${{ inputs.dry_run }}
           POST_ON_FIRST_RUN: ${{ inputs.post_on_first_run }}
         run: python canvas_to_discord.py

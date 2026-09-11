@@ -52,6 +52,22 @@ Repository **Settings → Secrets and variables → Actions → New repository s
 Only the mention configured there can ping. An `@everyone` written inside an announcement by
 an instructor stays inert, because the ping list is built from `DISCORD_MENTION` alone.
 
+## Seeing it in Discord before you rely on it
+
+**Actions → Canvas Announcements → Run workflow**, set **preview**, and the run posts to
+Discord immediately so you can look at the real formatting:
+
+- **`sample`** — posts a made-up announcement that exercises every supported construct:
+  headings, bold/italic, nested and numbered lists, links, block quotes, smart punctuation,
+  and an inert `@everyone`. Needs only `DISCORD_WEBHOOK_URL`, so it works before the Canvas
+  secrets are set.
+- **`latest`** — posts the most recent real announcement from your course, so you can see
+  how your instructor's actual formatting comes through.
+
+Neither one touches `sent_announcements.json`, so you can run a preview as many times as you
+like and the scheduled runs still behave as if it never happened. (`dry_run`, by contrast,
+posts nothing at all — it just prints what *would* go out.)
+
 ## First run
 
 Run it manually once: **Actions → Canvas Announcements → Run workflow**.
@@ -97,7 +113,11 @@ export COURSE_ID="12345"
 export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 export DISCORD_MENTION="<@your-user-id>"
 
+# print what would be posted, without posting
 DRY_RUN=true python canvas_to_discord.py
+
+# actually post a formatting sample to the channel (needs only the webhook)
+PREVIEW=sample python canvas_to_discord.py
 ```
 
 ## Troubleshooting

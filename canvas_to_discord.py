@@ -55,6 +55,7 @@ class Config:
     course_id: str
     webhook_url: str
     mention: str
+    preview: str
     lookback_days: int
     dry_run: bool
     post_on_first_run: bool
@@ -78,11 +79,20 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 
 def load_config() -> Config:
-    canvas_url = _env("CANVAS_URL", required=True).rstrip("/")
+    preview = (_env("PREVIEW", "") or "").lower()
+    if preview in {"off", "none", "false"}:
+        preview = ""
+    if preview and preview not in {"sample", "latest"}:
+        raise ConfigError(f"PREVIEW must be 'sample' or 'latest', got {preview!r}.")
+
+    # A sample preview never calls Canvas, so only the webhook has to be real.
+    needs_canvas = preview != "sample"
+
+    canvas_url = (_env("CANVAS_URL", "https://canvas.instructure.com", required=needs_canvas) or "").rstrip("/")
     if not canvas_url.startswith(("http://", "https://")):
         canvas_url = f"https://{canvas_url}"
 
-    course_id = _env("COURSE_ID", required=True)
+    course_id = _env("COURSE_ID", "0", required=needs_canvas) or "0"
     if not course_id.isdigit():
         raise ConfigError(
             f"COURSE_ID must be the numeric course id, got {course_id!r}. "
@@ -111,10 +121,11 @@ def load_config() -> Config:
 
     return Config(
         canvas_url=canvas_url,
-        canvas_token=_env("CANVAS_TOKEN", required=True),
+        canvas_token=_env("CANVAS_TOKEN", "", required=needs_canvas) or "",
         course_id=course_id,
         webhook_url=webhook_url,
         mention=mention,
+        preview=preview,
         lookback_days=lookback_days,
         dry_run=_env_flag("DRY_RUN"),
         post_on_first_run=_env_flag("POST_ON_FIRST_RUN"),
@@ -272,6 +283,9 @@ def html_to_markdown(html: str | None) -> str:
     # html2text indents top-level bullets by 2 spaces; Discord reads that as a
     # nested list, so shift every list level up by one.
     text = re.sub(r"^  (?=(?:[*+-]|\d+\.)\s)", "", text, flags=re.MULTILINE)
+    # html2text leaves a space between closing emphasis and punctuation ("**bold** ,").
+    # The lookbehind keeps a list bullet ("* ...text") from being treated as one.
+    text = re.sub(r"(?<=\S)(\*\*|__|\*|_)[ \t]+(?=[,.;:!?)\]])", r"\1", text)
     text = re.sub(r"^\s*(\*\s?){3,}\s*$", "───────────────", text, flags=re.MULTILINE)
     return text.strip()
 
@@ -311,6 +325,40 @@ def _truncate(text: str, limit: int, url: str) -> str:
         return text
     suffix = f"\n\n… [read the full announcement]({url})" if url else "\n\n…"
     return text[: max(0, limit - len(suffix))].rstrip() + suffix
+
+
+SAMPLE_HTML = """
+<p>This is a formatting preview, not a real announcement. If everything below
+renders properly, the bot is set up correctly.</p>
+<h2>Headings</h2>
+<p>Text can be <strong>bold</strong>, <em>italic</em>, or
+<a href="https://github.com/dgrondona/canvas-discord-announcements">a link</a>.</p>
+<h4>Headings deeper than Discord supports get clamped</h4>
+<ul>
+  <li>Bulleted lists</li>
+  <li>...with <strong>formatting</strong> inside
+    <ul><li>and nesting</li></ul>
+  </li>
+</ul>
+<ol><li>Numbered lists</li><li>work too</li></ol>
+<blockquote><p>Block quotes look like this.</p></blockquote>
+<hr />
+<p>Smart punctuation survives &mdash; &ldquo;like this&rdquo; &hellip; 50&ndash;60%.</p>
+<p>An @everyone typed inside an announcement stays inert. Only the mention
+configured in DISCORD_MENTION actually pings.</p>
+<p><img src="https://example.edu/seating.png" alt="images become their alt text" /></p>
+"""
+
+
+def sample_announcement(config: Config) -> dict:
+    return {
+        "id": 0,
+        "title": "Formatting preview",
+        "user_name": "Canvas → Discord bot",
+        "message": SAMPLE_HTML,
+        "posted_at": _iso(_now()),
+        "html_url": f"{config.canvas_url}/courses/{config.course_id}",
+    }
 
 
 def build_payload(config: Config, announcement: dict, course_name: str) -> dict:
@@ -412,6 +460,10 @@ def announcement_time(announcement: dict) -> datetime | None:
 
 
 def run(config: Config) -> None:
+    if config.preview:
+        run_preview(config)
+        return
+
     canvas = canvas_session(config)
 
     previous = load_state()
@@ -471,6 +523,29 @@ def run(config: Config) -> None:
         # Persist whatever made it out, so a mid-run failure can't cause a repost.
         save_state(sent)
         print(f"Posted {posted} of {len(new)} announcement(s).")
+
+
+def run_preview(config: Config) -> None:
+    """Post one announcement to Discord to eyeball the formatting.
+
+    Deliberately reads no state and writes none, so a preview can be run any
+    number of times without affecting what the scheduled runs consider posted.
+    """
+    if config.preview == "sample":
+        announcement = sample_announcement(config)
+        course_name = "Formatting preview"
+    else:
+        canvas = canvas_session(config)
+        announcements = fetch_announcements(canvas, config)
+        if not announcements:
+            print(f"No announcements in the last {config.lookback_days} day(s) to preview.")
+            return
+        epoch = datetime.min.replace(tzinfo=timezone.utc)
+        announcement = max(announcements, key=lambda item: announcement_time(item) or epoch)
+        course_name = fetch_course_name(canvas, config)
+
+    post_to_discord(requests.Session(), config, build_payload(config, announcement, course_name))
+    print(f"Preview posted: {announcement.get('title')!r}. The state file was not touched.")
 
 
 def _stamp_for(announcement: dict) -> str:
