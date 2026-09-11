@@ -1,11 +1,13 @@
 name: Canvas Announcements
 
 on:
-  # GitHub's scheduler is best-effort and often runs late. That is harmless here:
-  # the script looks back LOOKBACK_DAYS and skips anything already in the state
-  # file, so a skipped run is caught up by the next one.
+  # Offset from the top of the hour on purpose: GitHub queues every repo's
+  # */15 job at :00/:15/:30/:45, and runs in that stampede get delayed the most.
+  # The scheduler is best-effort either way, which is harmless here - the script
+  # looks back LOOKBACK_DAYS and skips anything already in the state file, so a
+  # late or skipped run is caught up by the next one.
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "3,18,33,48 * * * *"
   workflow_dispatch:
     inputs:
       preview:
@@ -22,6 +24,10 @@ on:
         default: false
       post_on_first_run:
         description: "Post the existing backlog instead of just recording it (first run only)"
+        type: boolean
+        default: false
+      verbose:
+        description: "Log announcement titles (note: Actions logs are public on a public repo)"
         type: boolean
         default: false
       lookback_days:
@@ -70,6 +76,7 @@ jobs:
           # "true" to post only course-wide announcements, skipping ones sent
           # to specific sections.
           COURSE_WIDE_ONLY: ${{ vars.COURSE_WIDE_ONLY }}
+          VERBOSE: ${{ inputs.verbose }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || vars.LOOKBACK_DAYS || '7' }}
           PREVIEW: ${{ inputs.preview }}
           DRY_RUN: ${{ inputs.dry_run }}

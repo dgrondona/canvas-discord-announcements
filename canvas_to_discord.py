@@ -65,6 +65,7 @@ class Config:
     mention: str
     preview: str
     course_wide_only: bool
+    verbose: bool
     lookback_days: int
     dry_run: bool
     post_on_first_run: bool
@@ -136,6 +137,7 @@ def load_config() -> Config:
         mention=mention,
         preview=preview,
         course_wide_only=_env_flag("COURSE_WIDE_ONLY"),
+        verbose=_env_flag("VERBOSE"),
         lookback_days=lookback_days,
         dry_run=_env_flag("DRY_RUN"),
         post_on_first_run=_env_flag("POST_ON_FIRST_RUN"),
@@ -458,6 +460,18 @@ def post_to_discord(session: requests.Session, config: Config, payload: dict) ->
 # --------------------------------------------------------------------------
 
 
+def describe(config: Config, announcement: dict) -> str:
+    """What to call an announcement in the run log.
+
+    Titles are omitted by default because Actions logs are world-readable on a
+    public repo, and an announcement title is course content. Set VERBOSE=true
+    on a manual run when you actually need to read them back.
+    """
+    if config.verbose:
+        return repr(announcement.get("title") or "(untitled)")
+    return f"announcement {announcement.get('id')}"
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -524,9 +538,9 @@ def run(config: Config) -> None:
     # state file exactly as it found it.
     if config.dry_run:
         for announcement in scoped:
-            print(f"  would skip, went to specific sections: {announcement.get('title')!r}")
+            print(f"  would skip, went to specific sections: {describe(config, announcement)}")
         for announcement in new:
-            print(f"  would post: {announcement.get('title')!r}")
+            print(f"  would post: {describe(config, announcement)}")
         print("DRY_RUN is set - nothing was posted and the state file was left alone.")
         return
 
@@ -534,12 +548,12 @@ def run(config: Config) -> None:
         # Recorded as handled so each is reported once, rather than on every run
         # until it ages out of the lookback window.
         sent[str(announcement["id"])] = _stamp_for(announcement)
-        print(f"  skipped, went to specific sections: {announcement.get('title')!r}")
+        print(f"  skipped, went to specific sections: {describe(config, announcement)}")
 
     if first_run and not config.post_on_first_run:
         for announcement in new:
             sent[str(announcement["id"])] = _stamp_for(announcement)
-            print(f"  recorded without posting: {announcement.get('title')!r}")
+            print(f"  recorded without posting: {describe(config, announcement)}")
         save_state(sent)
         print(
             f"First run: recorded {len(new)} existing announcement(s) without posting so the "
@@ -563,7 +577,7 @@ def run(config: Config) -> None:
             post_to_discord(discord, config, build_payload(config, announcement, course_name))
             sent[str(announcement["id"])] = _stamp_for(announcement)
             posted += 1
-            print(f"  posted: {announcement.get('title')!r}")
+            print(f"  posted: {describe(config, announcement)}")
             if index < len(new) - 1:
                 time.sleep(1)  # stay well inside the webhook rate limit
     finally:
@@ -592,7 +606,7 @@ def run_preview(config: Config) -> None:
         course_name = fetch_course_name(canvas, config)
 
     post_to_discord(requests.Session(), config, build_payload(config, announcement, course_name))
-    print(f"Preview posted: {announcement.get('title')!r}. The state file was not touched.")
+    print(f"Preview posted: {describe(config, announcement)}. The state file was not touched.")
 
 
 def _stamp_for(announcement: dict) -> str:

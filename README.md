@@ -1,6 +1,6 @@
 # Canvas → Discord announcements
 
-A GitHub Action that checks a Canvas course for new announcements every 30 minutes and
+A GitHub Action that checks a Canvas course for new announcements every 15 minutes and
 posts them to a Discord channel through a webhook.
 
 Announcements arrive as Discord embeds: the Canvas HTML is converted to markdown, so bold
@@ -131,11 +131,29 @@ IDs older than 90 days are pruned so the file doesn't grow forever.
 - **Nothing is missed if a run is skipped.** Each run looks back 7 days and skips whatever
   is already in the state file, so the schedule only controls *how late* an announcement
   arrives, never *whether* it arrives. Widening the cron costs latency, not coverage.
-- **Actions minutes.** This repo is private, and GitHub bills a minimum of one minute per
-  run: every 30 minutes is ~1,440 minutes/month, hourly is ~720, every 2 hours is ~360.
-  GitHub Free allows 500/month for private repos and Pro allows 3,000. Making the repo
-  public removes the limit entirely — Actions is free and unlimited for public repos, and
-  secrets stay secret either way.
+- **The cron is offset** (`3,18,33,48`) rather than `*/15`. GitHub queues every repo's
+  `*/15` job at :00/:15/:30/:45, and runs caught in that stampede are delayed the most.
+- **Actions minutes are free** because this repo is public. On a private repo GitHub bills
+  a minimum of one minute per run, which at this cadence would be ~2,880 minutes/month
+  against a 500 (Free) or 3,000 (Pro) allowance.
+- **Run logs are public**, since Actions logs follow repository visibility. Announcement
+  titles are therefore kept out of the logs — runs identify announcements by numeric ID.
+  Tick **verbose** on a manual run to log titles when you need to read them back, and
+  remember that output is public too.
+
+## Privacy
+
+Repository secrets stay secret in a public repo, and GitHub masks them in logs. Two things
+are visible that wouldn't be otherwise:
+
+- **Workflow run logs.** Hence the ID-only logging above. If you ever run with **verbose**,
+  delete that run afterwards (Actions → the run → ⋯ → Delete workflow run).
+- **`sent_announcements.json`.** It holds Canvas announcement IDs and post timestamps —
+  numbers only, no titles or bodies, and not resolvable without access to the course.
+
+`COURSE_ID` is a secret, so the repo doesn't reveal which course this watches. The Canvas
+hostname does appear as the default for `CANVAS_URL` in the workflow; set `CANVAS_URL` as a
+secret and drop that default if you'd rather it didn't.
 
 ## Running locally
 
