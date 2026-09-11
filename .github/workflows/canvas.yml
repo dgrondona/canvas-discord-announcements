@@ -1,0 +1,100 @@
+name: Canvas Announcements
+
+on:
+  # GitHub's scheduler is best-effort and often runs late. That is harmless here:
+  # the script looks back LOOKBACK_DAYS and skips anything already in the state
+  # file, so a skipped run is caught up by the next one.
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be posted without posting it"
+        type: boolean
+        default: false
+      post_on_first_run:
+        description: "Post the existing backlog instead of just recording it (first run only)"
+        type: boolean
+        default: false
+      lookback_days:
+        description: "How many days back to look (default 7)"
+        type: string
+        default: ""
+
+# One run at a time, so two runs can't post the same announcement or fight over
+# the state commit.
+concurrency:
+  group: canvas-announcements
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Post new announcements to Discord
+        env:
+          # Secrets win; repository variables are the fallback for the values you
+          # don't mind seeing in logs. Secrets are masked in output, which also
+          # masks them inside error messages.
+          CANVAS_URL: ${{ secrets.CANVAS_URL || vars.CANVAS_URL || 'https://canvas.ucmerced.edu' }}
+          CANVAS_TOKEN: ${{ secrets.CANVAS_TOKEN }}
+          COURSE_ID: ${{ secrets.COURSE_ID || vars.COURSE_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Who gets pinged: "<@your-user-id>" for now, "@everyone" later.
+          DISCORD_MENTION: ${{ secrets.DISCORD_MENTION || vars.DISCORD_MENTION }}
+          LOOKBACK_DAYS: ${{ inputs.lookback_days || vars.LOOKBACK_DAYS || '7' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          POST_ON_FIRST_RUN: ${{ inputs.post_on_first_run }}
+        run: python canvas_to_discord.py
+
+      - name: Commit announcement state
+        # always(), so announcements that did go out are still recorded when a
+        # later one fails - otherwise the next run would repost them.
+        if: always()
+        run: |
+          set -euo pipefail
+
+          if [ ! -f sent_announcements.json ]; then
+            echo "No state file was written; nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sent_announcements.json
+
+          if git diff --cached --quiet; then
+            echo "Announcement state unchanged."
+            exit 0
+          fi
+
+          git commit -m "Update announcement state [skip ci]"
+
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "Pushed announcement state."
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}); rebasing onto origin and retrying."
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+          done
+
+          echo "Could not push announcement state after 3 attempts." >&2
+          exit 1
