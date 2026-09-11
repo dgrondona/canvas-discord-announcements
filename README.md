@@ -1,11 +1,15 @@
-# Canvas → Discord announcements
+# Canvas → Discord
 
-A GitHub Action that checks a Canvas course for new announcements every 15 minutes and
-posts them to a Discord channel through a webhook.
+Two GitHub Actions that mirror a Canvas course into Discord:
 
-Announcements arrive as Discord embeds: the Canvas HTML is converted to markdown, so bold
-and italic text, headings, lists, blockquotes and links survive instead of showing up as raw
-`<p>` tags. The embed title links back to Canvas.
+| Workflow | Does | Runs |
+| --- | --- | --- |
+| **Canvas Announcements** (`canvas.yml`) | posts new announcements to a text channel | every 15 min |
+| **Lab Threads** (`labs.yml`) | opens a forum thread per lab assignment, to reply under with your work | every 30 min |
+
+Both convert Canvas's HTML to markdown, so bold and italic text, headings, lists, block
+quotes and links survive instead of arriving as raw `<p>` tags. Shared plumbing lives in
+[common.py](common.py); each bot keeps its own state file so they never interfere.
 
 ## Setup
 
@@ -21,10 +25,15 @@ course you're enrolled in.
 
 The number in the course URL: `https://canvas.ucmerced.edu/courses/12345` → `12345`.
 
-### 3. Discord webhook
+### 3. Discord webhooks (one per channel)
 
-In the target channel: **Edit Channel → Integrations → Webhooks → New Webhook**, then
-**Copy Webhook URL**. Anyone holding that URL can post to the channel, so keep it secret.
+A Discord webhook can only post to the **one channel it was created on**, so each bot needs
+its own. In each target channel — the announcements text channel, and the lab forum channel —
+go to **Edit Channel → Integrations → Webhooks → New Webhook**, then **Copy Webhook URL**.
+Anyone holding that URL can post to the channel, so keep both secret.
+
+Skip the forum one if you only want announcements; `labs.yml` just fails cleanly until it's
+set.
 
 ### 4. Your Discord user ID (for the ping)
 
@@ -39,15 +48,19 @@ Repository **Settings → Secrets and variables → Actions → New repository s
 | --- | --- | --- |
 | `CANVAS_TOKEN` | yes | The token from step 1 |
 | `COURSE_ID` | yes | The number from step 2 |
-| `DISCORD_WEBHOOK_URL` | yes | The URL from step 3 |
-| `DISCORD_MENTION` | no | Who to ping — see below |
+| `DISCORD_WEBHOOK_URL` | yes | Announcements channel webhook, from step 3 |
+| `DISCORD_FORUM_WEBHOOK_URL` | for labs | Lab forum channel webhook, from step 3 |
+| `DISCORD_MENTION` | no | Who to ping for announcements — see below |
+| `DISCORD_LAB_MENTION` | no | Who to ping for labs. Unset means no ping; a new forum thread already notifies channel followers. |
 | `CANVAS_URL` | no | Defaults to `https://canvas.ucmerced.edu` |
 
-One optional repository **variable** (same screen, "Variables" tab):
+Optional repository **variables** (same screen, "Variables" tab):
 
 | Variable | Value |
 | --- | --- |
 | `COURSE_WIDE_ONLY` | `true` to post only course-wide announcements, skipping ones sent to specific sections. Defaults to off. |
+| `LAB_PATTERN` | Which assignments count as labs. A regular expression, case-insensitive, matched against the assignment name. Defaults to `\bLab\b`. |
+| `LAB_FORUM_TAGS` | Comma-separated forum tag ids to apply to new threads. Only needed if the forum requires tags. |
 
 `DISCORD_MENTION` accepts a bare user ID, `<@user-id>`, a role as `<@&role-id>`, or
 `@everyone`. Leave it unset for no ping at all.
@@ -57,6 +70,36 @@ One optional repository **variable** (same screen, "Variables" tab):
 
 Only the mention configured there can ping. An `@everyone` written inside an announcement by
 an instructor stays inert, because the ping list is built from `DISCORD_MENTION` alone.
+
+## Lab threads
+
+`labs.yml` watches the course's **assignments**, keeps the ones whose name matches
+`LAB_PATTERN` (default: contains the word "Lab"), and gives each one a forum thread you can
+reply under with your work. Unpublished assignments are ignored.
+
+The thread's first post carries the description, with a card showing the due date, points and
+submission types. Due dates render as Discord timestamps, so everyone sees them in their own
+timezone. Discord caps a message at 2000 characters, so a long description continues as
+replies rather than being cut off.
+
+**When an assignment changes**, the posts are edited in place so the thread is never stale.
+If something worth noticing moved — the due date, points, title, or open/close dates — a reply
+also says what changed:
+
+> 📝 **This assignment changed**
+> • Due date: Fri 3 Oct → Mon 6 Oct
+> • Points: 20 → 30
+
+An instructor fixing a typo in the description edits silently instead, so the thread doesn't
+nag about nothing.
+
+**The first run creates nothing.** It records the labs that already exist so the forum doesn't
+fill up with threads for labs that are already over. Anything added later gets a thread
+automatically. To thread the existing ones too, run the workflow manually with **backfill**
+ticked.
+
+**Forum setup note:** if the forum has "Require people to select tags when posting" enabled,
+webhook posts without tags are rejected. Either turn that off or set `LAB_FORUM_TAGS`.
 
 ## Colour coding
 
@@ -86,6 +129,9 @@ ones; skipped announcements are named once in the run log and then not reconside
 
 **Actions → Canvas Announcements → Run workflow**, set **preview**, and the run posts to
 Discord immediately so you can look at the real formatting:
+
+Both workflows have this. `labs.yml` offers only `sample`, which opens a throwaway thread —
+delete it when you're done looking.
 
 - **`sample`** — posts a made-up announcement that exercises every supported construct:
   headings, bold/italic, nested and numbered lists, links, block quotes, smart punctuation,
@@ -148,8 +194,9 @@ are visible that wouldn't be otherwise:
 
 - **Workflow run logs.** Hence the ID-only logging above. If you ever run with **verbose**,
   delete that run afterwards (Actions → the run → ⋯ → Delete workflow run).
-- **`sent_announcements.json`.** It holds Canvas announcement IDs and post timestamps —
-  numbers only, no titles or bodies, and not resolvable without access to the course.
+- **`sent_announcements.json`** and **`lab_threads.json`.** They hold Canvas IDs, Discord
+  message IDs and timestamps — numbers only, no titles or bodies, and not resolvable without
+  access to the course.
 
 `COURSE_ID` is a secret, so the repo doesn't reveal which course this watches. The Canvas
 hostname does appear as the default for `CANVAS_URL` in the workflow; set `CANVAS_URL` as a
@@ -166,11 +213,23 @@ export COURSE_ID="12345"
 export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 export DISCORD_MENTION="<@your-user-id>"
 
-# print what would be posted, without posting
+# announcements: print what would be posted, without posting
 DRY_RUN=true python canvas_to_discord.py
 
-# actually post a formatting sample to the channel (needs only the webhook)
+# announcements: post a formatting sample (needs only the webhook)
 PREVIEW=sample python canvas_to_discord.py
+```
+
+For the lab threads bot:
+
+```bash
+export DISCORD_FORUM_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+
+# show which assignments match, and what would happen to each
+DRY_RUN=true VERBOSE=true python canvas_labs.py
+
+# open a throwaway sample thread (needs only the forum webhook)
+PREVIEW=sample python canvas_labs.py
 ```
 
 ## Troubleshooting
@@ -185,6 +244,10 @@ Failures print one clear line and fail the step.
 | `Canvas returned 404` | Wrong `CANVAS_URL` or `COURSE_ID` |
 | `COURSE_ID must be the numeric course id` | Use `12345`, not the course name |
 | `Discord rejected the webhook (401/403/404)` | Webhook deleted or URL wrong |
+| `DISCORD_FORUM_WEBHOOK_URL is not set` | The lab bot needs its own webhook, on the forum channel |
+| `Discord did not return the created thread` | The forum webhook points at a normal text channel, or the forum requires tags and `LAB_FORUM_TAGS` isn't set |
+| `LAB_PATTERN is not a valid regular expression` | Fix the pattern, or delete the variable to fall back to `\bLab\b` |
+| Lab threads never appear | Expected until a *new* lab is posted — the first run only records existing ones. Run manually with **backfill** to thread them. |
 | Push fails in "Commit announcement state" | **Settings → Actions → General → Workflow permissions** → "Read and write permissions" |
 
 Secrets appear as `***` in logs, including inside these messages. If you need to see the

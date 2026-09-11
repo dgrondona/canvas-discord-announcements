@@ -297,12 +297,14 @@ def _discord_request(
     method: str,
     url: str,
     webhook: Webhook,
-    payload: dict,
+    payload: dict | None = None,
     params: dict | None = None,
 ) -> dict | None:
     """Send one webhook call, handling 429s and mapping failures to clear errors."""
     for _ in range(5):
-        response = session.request(method, url, json=payload, params=params, timeout=30)
+        # DELETE carries no body, and Discord is happier without an empty one.
+        body = {"json": payload} if payload is not None else {}
+        response = session.request(method, url, params=params, timeout=30, **body)
 
         if response.status_code == 429:
             try:
@@ -368,6 +370,19 @@ def edit_discord_message(
     params = {"thread_id": thread_id} if thread_id else None
     url = f"{webhook.url.rstrip('/')}/messages/{message_id}"
     return _discord_request(session, "PATCH", url, webhook, payload, params)
+
+
+def delete_discord_message(
+    session: requests.Session,
+    webhook: Webhook,
+    message_id: str,
+    *,
+    thread_id: str | None = None,
+) -> None:
+    """Delete a message this webhook previously sent."""
+    params = {"thread_id": thread_id} if thread_id else None
+    url = f"{webhook.url.rstrip('/')}/messages/{message_id}"
+    _discord_request(session, "DELETE", url, webhook, None, params)
 
 
 # --------------------------------------------------------------------------
