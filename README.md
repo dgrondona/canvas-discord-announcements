@@ -43,6 +43,12 @@ Repository **Settings → Secrets and variables → Actions → New repository s
 | `DISCORD_MENTION` | no | Who to ping — see below |
 | `CANVAS_URL` | no | Defaults to `https://canvas.ucmerced.edu` |
 
+One optional repository **variable** (same screen, "Variables" tab):
+
+| Variable | Value |
+| --- | --- |
+| `COURSE_WIDE_ONLY` | `true` to post only course-wide announcements, skipping ones sent to specific sections. Defaults to off. |
+
 `DISCORD_MENTION` accepts a bare user ID, `<@user-id>`, a role as `<@&role-id>`, or
 `@everyone`. Leave it unset for no ping at all.
 
@@ -51,6 +57,30 @@ Repository **Settings → Secrets and variables → Actions → New repository s
 
 Only the mention configured there can ping. An `@everyone` written inside an announcement by
 an instructor stays inert, because the ping list is built from `DISCORD_MENTION` alone.
+
+## Colour coding
+
+The embed's left sidebar is coloured by a keyword in the announcement title:
+
+| Title contains | Colour |
+| --- | --- |
+| `CRITICAL` | red |
+| `IMPORTANT` | orange |
+| `REMINDER` | light blue |
+| anything else | gray |
+
+Matching ignores case and needs a whole word, so `[CRITICAL]` and `Critical:` both hit but
+"critically acclaimed" doesn't. If a title has more than one, the most severe wins.
+
+## Who an announcement went to
+
+Canvas announcements go to a whole course or to particular sections of it. A message meant
+for one student is an Inbox *conversation*, which lives behind a different API that this
+script never calls — so a private message cannot end up in the channel.
+
+That leaves section-scoped announcements. They are posted by default. Set the
+`COURSE_WIDE_ONLY` repository variable to `true` to skip them and post only course-wide
+ones; skipped announcements are named once in the run log and then not reconsidered.
 
 ## Seeing it in Discord before you rely on it
 
@@ -98,9 +128,14 @@ IDs older than 90 days are pruned so the file doesn't grow forever.
   missed, it just arrives later.
 - GitHub disables scheduled workflows after 60 days of repository inactivity. The state
   commits count as activity, so this keeps itself alive while announcements keep coming.
-- On a **private** repo a 30-minute schedule is roughly 1,400+ Actions minutes a month,
-  which exceeds the free tier. Either keep the repo public or widen the cron in
-  [.github/workflows/canvas.yml](.github/workflows/canvas.yml).
+- **Nothing is missed if a run is skipped.** Each run looks back 7 days and skips whatever
+  is already in the state file, so the schedule only controls *how late* an announcement
+  arrives, never *whether* it arrives. Widening the cron costs latency, not coverage.
+- **Actions minutes.** This repo is private, and GitHub bills a minimum of one minute per
+  run: every 30 minutes is ~1,440 minutes/month, hourly is ~720, every 2 hours is ~360.
+  GitHub Free allows 500/month for private repos and Pro allows 3,000. Making the repo
+  public removes the limit entirely — Actions is free and unlimited for public repos, and
+  secrets stay secret either way.
 
 ## Running locally
 

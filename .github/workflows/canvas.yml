@@ -67,6 +67,9 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           # Who gets pinged: "<@your-user-id>" for now, "@everyone" later.
           DISCORD_MENTION: ${{ secrets.DISCORD_MENTION || vars.DISCORD_MENTION }}
+          # "true" to post only course-wide announcements, skipping ones sent
+          # to specific sections.
+          COURSE_WIDE_ONLY: ${{ vars.COURSE_WIDE_ONLY }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || vars.LOOKBACK_DAYS || '7' }}
           PREVIEW: ${{ inputs.preview }}
           DRY_RUN: ${{ inputs.dry_run }}

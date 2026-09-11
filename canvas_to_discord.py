@@ -36,7 +36,15 @@ DISCORD_DESCRIPTION_LIMIT = 4096
 DISCORD_CONTENT_LIMIT = 2000
 DISCORD_AUTHOR_LIMIT = 256
 DISCORD_FOOTER_LIMIT = 2048
-EMBED_COLOR = 0xE13223  # Canvas red
+# Sidebar colour, chosen by a keyword in the announcement title. First match
+# wins, so CRITICAL outranks IMPORTANT outranks REMINDER. Word boundaries keep
+# "[CRITICAL]" and "CRITICAL:" matching without also catching "critically".
+PRIORITY_COLORS = (
+    (re.compile(r"\bcritical\b", re.IGNORECASE), 0xE13223),   # red
+    (re.compile(r"\bimportant\b", re.IGNORECASE), 0xE67E22),  # orange
+    (re.compile(r"\breminder\b", re.IGNORECASE), 0x74C0FC),   # light blue
+)
+DEFAULT_COLOR = 0x99AAB5  # gray
 
 
 class ConfigError(Exception):
@@ -56,6 +64,7 @@ class Config:
     webhook_url: str
     mention: str
     preview: str
+    course_wide_only: bool
     lookback_days: int
     dry_run: bool
     post_on_first_run: bool
@@ -126,6 +135,7 @@ def load_config() -> Config:
         webhook_url=webhook_url,
         mention=mention,
         preview=preview,
+        course_wide_only=_env_flag("COURSE_WIDE_ONLY"),
         lookback_days=lookback_days,
         dry_run=_env_flag("DRY_RUN"),
         post_on_first_run=_env_flag("POST_ON_FIRST_RUN"),
@@ -224,6 +234,9 @@ def fetch_announcements(session: requests.Session, config: Config) -> list[dict]
         # end covers clock skew and announcements dated slightly in the future.
         "end_date": _iso(now + timedelta(days=1)),
         "active_only": "true",
+        # Documented to come back only for section-scoped topics, so it doubles
+        # as a check for is_section_specific, which Canvas does not document.
+        "include[]": "sections",
         "per_page": 100,
     }
 
@@ -239,6 +252,16 @@ def fetch_announcements(session: requests.Session, config: Config) -> list[dict]
         url = response.links.get("next", {}).get("url")
         params = None  # the Link header URL already carries the query string
     return announcements
+
+
+def is_section_specific(announcement: dict) -> bool:
+    """Whether this went to particular sections rather than the whole course.
+
+    Note this is the only "not everyone" case that can reach us at all: a Canvas
+    message to one student is an Inbox conversation, a different API this script
+    never touches, so those can't leak into the channel.
+    """
+    return bool(announcement.get("is_section_specific") or announcement.get("sections"))
 
 
 def fetch_course_name(session: requests.Session, config: Config) -> str:
@@ -361,6 +384,13 @@ def sample_announcement(config: Config) -> dict:
     }
 
 
+def embed_color(title: str) -> int:
+    for pattern, color in PRIORITY_COLORS:
+        if pattern.search(title or ""):
+            return color
+    return DEFAULT_COLOR
+
+
 def build_payload(config: Config, announcement: dict, course_name: str) -> dict:
     url = announcement.get("html_url") or ""
     title = (announcement.get("title") or "(untitled announcement)")[:DISCORD_TITLE_LIMIT]
@@ -373,7 +403,7 @@ def build_payload(config: Config, announcement: dict, course_name: str) -> dict:
         },
         "title": title,
         "description": _truncate(body, DISCORD_DESCRIPTION_LIMIT, url),
-        "color": EMBED_COLOR,
+        "color": embed_color(title),
     }
     if url:
         embed["url"] = url
@@ -485,11 +515,26 @@ def run(config: Config) -> None:
         f"{len(new)} not yet posted."
     )
 
+    scoped: list[dict] = []
+    if config.course_wide_only:
+        scoped = [item for item in new if is_section_specific(item)]
+        new = [item for item in new if not is_section_specific(item)]
+
+    # Nothing above this point may touch `sent`: a dry run has to leave the
+    # state file exactly as it found it.
     if config.dry_run:
+        for announcement in scoped:
+            print(f"  would skip, went to specific sections: {announcement.get('title')!r}")
         for announcement in new:
             print(f"  would post: {announcement.get('title')!r}")
         print("DRY_RUN is set - nothing was posted and the state file was left alone.")
         return
+
+    for announcement in scoped:
+        # Recorded as handled so each is reported once, rather than on every run
+        # until it ages out of the lookback window.
+        sent[str(announcement["id"])] = _stamp_for(announcement)
+        print(f"  skipped, went to specific sections: {announcement.get('title')!r}")
 
     if first_run and not config.post_on_first_run:
         for announcement in new:
@@ -504,8 +549,10 @@ def run(config: Config) -> None:
         return
 
     if not new:
-        if first_run:
-            save_state(sent)  # create the file so the next run isn't a "first run" too
+        # first_run creates the file so the next run isn't a "first run" too;
+        # scoped means there are skip records to persist.
+        if first_run or scoped:
+            save_state(sent)
         return
 
     discord = requests.Session()
