@@ -239,19 +239,23 @@ def build_embed(config: Config, assignment: dict, course_name: str) -> dict:
 
 
 def render(config: Config, assignment: dict, course_name: str) -> tuple[dict, list[str]]:
-    """Build the starter payload plus the continuation messages."""
+    """Build the starter post, plus the description messages that follow it.
+
+    The starter post carries only the metadata card - due date, points, link - so
+    the thread opens with the details you scan for rather than a wall of text.
+    The description goes in replies, since Discord caps a message at 2000
+    characters and a lab description routinely runs past that.
+    """
     description = html_to_markdown(assignment.get("description"))
     chunks = chunk_markdown(description, CHUNK_LIMIT)
 
-    prefix = f"{config.mention} " if config.mention else ""
-    first = chunks[0] if chunks else "_(no description on this assignment)_"
-
-    starter = {
-        "content": f"{prefix}{first}"[:2000],
+    starter: dict = {
         "embeds": [build_embed(config, assignment, course_name)],
         "allowed_mentions": build_allowed_mentions(config.mention),
     }
-    return starter, chunks[1:]
+    if config.mention:
+        starter["content"] = config.mention
+    return starter, chunks
 
 
 def fingerprint(config: Config, assignment: dict) -> str:
@@ -300,7 +304,7 @@ def create_thread(
     session: requests.Session, config: Config, assignment: dict, course_name: str
 ) -> dict:
     """Open the forum thread and return its state entry."""
-    starter, continuations = render(config, assignment, course_name)
+    starter, chunks = render(config, assignment, course_name)
 
     payload = dict(starter)
     payload["thread_name"] = (assignment.get("name") or "Untitled assignment")[
@@ -316,31 +320,47 @@ def create_thread(
             "channel, and the channel must not require tags unless LAB_FORUM_TAGS is set."
         )
 
-    # A forum thread's id is the id of its starter message, so this one value is
-    # both the thread to reply into and the message to edit later.
-    thread_id = str(created["id"])
-    message_ids = [thread_id]
+    # channel_id is the thread; id is the starter message inside it. They are
+    # normally the same snowflake for a forum post, but replying targets the
+    # thread and editing targets the message, so don't assume it - guessing wrong
+    # makes the starter post succeed and every reply fail.
+    starter_id = str(created["id"])
+    thread_id = str(created.get("channel_id") or starter_id)
 
-    for chunk in continuations:
-        time.sleep(1)  # stay well inside the webhook rate limit
-        reply = post_to_discord(
-            session,
-            config.webhook,
-            {"content": chunk, "allowed_mentions": {"parse": []}},
-            wait=True,
-            thread_id=thread_id,
-        )
-        if reply and reply.get("id"):
-            message_ids.append(str(reply["id"]))
-
+    message_ids = _post_description(session, config, thread_id, chunks)
     return {
         "state": "threaded",
         "thread_id": thread_id,
+        "starter_id": starter_id,
         "message_ids": message_ids,
         "created_at": iso(now()),
         "fingerprint": fingerprint(config, assignment),
         "notable": notable_of(assignment),
     }
+
+
+def _post_description(
+    session: requests.Session, config: Config, thread_id: str, chunks: list[str]
+) -> list[str]:
+    message_ids: list[str] = []
+    for index, chunk in enumerate(chunks):
+        time.sleep(1)  # stay well inside the webhook rate limit
+        try:
+            reply = post_to_discord(
+                session,
+                config.webhook,
+                {"content": chunk, "allowed_mentions": {"parse": []}},
+                wait=True,
+                thread_id=thread_id,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"Failed posting description part {index + 1} of {len(chunks)} "
+                f"({len(chunk)} chars) into thread {thread_id}: {exc}"
+            ) from None
+        if reply and reply.get("id"):
+            message_ids.append(str(reply["id"]))
+    return message_ids
 
 
 def update_thread(
@@ -351,35 +371,40 @@ def update_thread(
     course_name: str,
 ) -> dict:
     """Bring an existing thread back in line with the assignment."""
-    starter, continuations = render(config, assignment, course_name)
-    thread_id = entry["thread_id"]
-    stored_ids = [str(i) for i in entry.get("message_ids") or [thread_id]]
-    wanted = [starter] + [
-        {"content": chunk, "allowed_mentions": {"parse": []}} for chunk in continuations
-    ]
+    starter, chunks = render(config, assignment, course_name)
+    thread_id = str(entry["thread_id"])
+    # Entries written before the starter post and thread were tracked separately
+    # used the thread id for both.
+    starter_id = str(entry.get("starter_id") or thread_id)
+    stored_ids = [str(i) for i in entry.get("message_ids") or []]
+
+    edit_discord_message(session, config.webhook, starter_id, starter, thread_id=thread_id)
 
     message_ids = list(stored_ids)
-    for index, payload in enumerate(wanted):
+    for index, chunk in enumerate(chunks):
+        payload = {"content": chunk, "allowed_mentions": {"parse": []}}
         if index < len(stored_ids):
             edit_discord_message(
                 session, config.webhook, stored_ids[index], payload, thread_id=thread_id
             )
         else:
-            # The description grew past what the existing messages can hold.
+            # The description grew past what the existing replies can hold.
             reply = post_to_discord(
                 session, config.webhook, payload, wait=True, thread_id=thread_id
             )
             if reply and reply.get("id"):
                 message_ids.append(str(reply["id"]))
 
-    # The description shrank: drop the messages that are now surplus.
-    for stale in stored_ids[len(wanted) :]:
+    # The description shrank: drop the replies that are now surplus.
+    for stale in stored_ids[len(chunks) :]:
         delete_discord_message(session, config.webhook, stale, thread_id=thread_id)
         if stale in message_ids:
             message_ids.remove(stale)
 
     return {
         **entry,
+        "thread_id": thread_id,
+        "starter_id": starter_id,
         "message_ids": message_ids,
         "fingerprint": fingerprint(config, assignment),
         "notable": notable_of(assignment),
@@ -475,8 +500,7 @@ def pick_preview_lab(session: requests.Session, config: Config) -> dict:
 
 def print_preview(config: Config, assignment: dict, course_name: str) -> None:
     """Show what would be posted without posting it."""
-    starter, continuations = render(config, assignment, course_name)
-    messages = [starter["content"], *continuations]
+    starter, chunks = render(config, assignment, course_name)
 
     name = (assignment.get("name") or "")[:DISCORD_THREAD_NAME_LIMIT]
     if config.verbose:
@@ -484,16 +508,19 @@ def print_preview(config: Config, assignment: dict, course_name: str) -> None:
     else:
         # The name is course content, so report only whether it had to be cut.
         print(f"  thread name: {len(name)} chars (limit {DISCORD_THREAD_NAME_LIMIT})")
+
+    print("  starter post: the card below, no description text")
     for field in starter["embeds"][0]["fields"]:
-        print(f"  {field['name']}: {field['value'].replace(chr(10), '  ')}")
-    print(f"  {len(messages)} message(s), longest {max(len(m) for m in messages)} chars (limit 2000)")
+        print(f"    {field['name']}: {field['value'].replace(chr(10), '  ')}")
+    longest = max((len(chunk) for chunk in chunks), default=0)
+    print(f"  description: {len(chunks)} repl(y/ies), longest {longest} chars (limit 2000)")
 
     if not config.verbose:
         print("  (re-run with verbose to print the text itself)")
         return
-    for index, message in enumerate(messages):
-        print(f"  --- {'starter post' if index == 0 else f'reply {index}'} ---")
-        print(message)
+    for index, chunk in enumerate(chunks, 1):
+        print(f"  --- reply {index} ---")
+        print(chunk)
 
 
 # --------------------------------------------------------------------------

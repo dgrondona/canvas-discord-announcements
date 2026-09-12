@@ -77,10 +77,14 @@ an instructor stays inert, because the ping list is built from `DISCORD_MENTION`
 `LAB_PATTERN` (default: contains the word "Lab"), and gives each one a forum thread you can
 reply under with your work. Unpublished assignments are ignored.
 
-The thread's first post carries the description, with a card showing the due date, points and
-submission types. Due dates render as Discord timestamps, so everyone sees them in their own
-timezone. Discord caps a message at 2000 characters, so a long description continues as
-replies rather than being cut off.
+The thread's **first post is just the information card** — due date, points, submission types,
+and a link back to Canvas. Due dates render as Discord timestamps, so everyone sees them in
+their own timezone.
+
+The **description follows as replies**, so the top of the thread stays scannable instead of
+opening with a wall of text. Discord caps a message at 2000 characters, so a long description
+is split across several replies at paragraph boundaries. A lab with no description just gets
+the card.
 
 **When an assignment changes**, the posts are edited in place so the thread is never stale.
 If something worth noticing moved — the due date, points, title, or open/close dates — a reply
@@ -92,6 +96,10 @@ also says what changed:
 
 An instructor fixing a typo in the description edits silently instead, so the thread doesn't
 nag about nothing.
+
+One limit: a webhook can't rename an existing forum thread, so if the assignment's title
+changes, the thread keeps its original name. The card's title and the change reply both show
+the new one.
 
 **The first run creates nothing.** It records the labs that already exist so the forum doesn't
 fill up with threads for labs that are already over. Anything added later gets a thread
