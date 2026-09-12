@@ -249,12 +249,14 @@ def render(config: Config, assignment: dict, course_name: str) -> tuple[dict, li
     description = html_to_markdown(assignment.get("description"))
     chunks = chunk_markdown(description, CHUNK_LIMIT)
 
+    # No mention here: Discord always renders content above embeds, so a ping in
+    # the starter post would sit on top of the card. It goes in a reply instead,
+    # which also keeps it out of the fingerprint - changing who gets pinged
+    # shouldn't re-edit every existing thread.
     starter: dict = {
         "embeds": [build_embed(config, assignment, course_name)],
-        "allowed_mentions": build_allowed_mentions(config.mention),
+        "allowed_mentions": {"parse": []},
     }
-    if config.mention:
-        starter["content"] = config.mention
     return starter, chunks
 
 
@@ -326,6 +328,19 @@ def create_thread(
     # makes the starter post succeed and every reply fail.
     starter_id = str(created["id"])
     thread_id = str(created.get("channel_id") or starter_id)
+
+    # The ping goes first among the replies, so it lands directly under the card.
+    if config.mention:
+        time.sleep(1)
+        post_to_discord(
+            session,
+            config.webhook,
+            {
+                "content": config.mention,
+                "allowed_mentions": build_allowed_mentions(config.mention),
+            },
+            thread_id=thread_id,
+        )
 
     message_ids = _post_description(session, config, thread_id, chunks)
     return {

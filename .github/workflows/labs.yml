@@ -1,11 +1,11 @@
 name: Lab Threads
 
 on:
-  # Every 30 minutes - assignments change far less often than announcements.
-  # Offset from the announcements cron (3,18,33,48) so the two workflows aren't
-  # pushing their state commits at the same moment.
+  # Every 15 minutes, matching the announcements workflow. Offset by 5 minutes
+  # from its 3,18,33,48 so the two aren't pushing state commits at once, and off
+  # the quarter-hour because GitHub queues every repo's */15 job there.
   schedule:
-    - cron: "11,41 * * * *"
+    - cron: "8,23,38,53 * * * *"
   workflow_dispatch:
     inputs:
       preview:

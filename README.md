@@ -5,7 +5,7 @@ Two GitHub Actions that mirror a Canvas course into Discord:
 | Workflow | Does | Runs |
 | --- | --- | --- |
 | **Canvas Announcements** (`canvas.yml`) | posts new announcements to a text channel | every 15 min |
-| **Lab Threads** (`labs.yml`) | opens a forum thread per lab assignment, to reply under with your work | every 30 min |
+| **Lab Threads** (`labs.yml`) | opens a forum thread per lab assignment, to reply under with your work | every 15 min |
 
 Both convert Canvas's HTML to markdown, so bold and italic text, headings, lists, block
 quotes and links survive instead of arriving as raw `<p>` tags. Shared plumbing lives in
@@ -51,7 +51,7 @@ Repository **Settings → Secrets and variables → Actions → New repository s
 | `DISCORD_WEBHOOK_URL` | yes | Announcements channel webhook, from step 3 |
 | `DISCORD_FORUM_WEBHOOK_URL` | for labs | Lab forum channel webhook, from step 3 |
 | `DISCORD_MENTION` | no | Who to ping for announcements — see below |
-| `DISCORD_LAB_MENTION` | no | Who to ping for labs. Unset means no ping; a new forum thread already notifies channel followers. |
+| `DISCORD_LAB_MENTION` | no | Who to ping for labs. Set to `@everyone` to notify the server on each new lab; unset means no ping. |
 | `CANVAS_URL` | no | Defaults to `https://canvas.ucmerced.edu` |
 
 Optional repository **variables** (same screen, "Variables" tab):
@@ -81,10 +81,19 @@ The thread's **first post is just the information card** — due date, points, s
 and a link back to Canvas. Due dates render as Discord timestamps, so everyone sees them in
 their own timezone.
 
+If `DISCORD_LAB_MENTION` is set, the **ping comes next**, directly under the card — set it to
+`@everyone` to notify the server on every new lab. It sits in a reply rather than the starter
+post because Discord always renders message text *above* an embed, so a ping in the starter
+post would land on top of the card instead of under it.
+
 The **description follows as replies**, so the top of the thread stays scannable instead of
 opening with a wall of text. Discord caps a message at 2000 characters, so a long description
 is split across several replies at paragraph boundaries. A lab with no description just gets
 the card.
+
+Only the deliberate ping message can notify anyone. The description replies are posted with
+mentions disabled, so an `@everyone` an instructor typed into the assignment text stays inert.
+Changing `DISCORD_LAB_MENTION` doesn't retroactively edit existing threads.
 
 **When an assignment changes**, the posts are edited in place so the thread is never stale.
 If something worth noticing moved — the due date, points, title, or open/close dates — a reply
