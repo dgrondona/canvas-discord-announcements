@@ -9,12 +9,17 @@ on:
   workflow_dispatch:
     inputs:
       preview:
-        description: "Post a throwaway sample thread to check the formatting"
+        description: "Post a throwaway thread to check formatting: sample = made up, real = an actual lab"
         type: choice
         options:
           - "off"
           - sample
+          - real
         default: "off"
+      preview_lab:
+        description: "Which lab to preview (name or assignment id, e.g. 'Lab 1'). Empty = earliest due."
+        type: string
+        default: ""
       dry_run:
         description: "List what would happen without posting anything"
         type: boolean
@@ -65,6 +70,7 @@ jobs:
           LAB_PATTERN: ${{ vars.LAB_PATTERN }}
           LAB_FORUM_TAGS: ${{ vars.LAB_FORUM_TAGS }}
           PREVIEW: ${{ inputs.preview }}
+          PREVIEW_LAB: ${{ inputs.preview_lab }}
           DRY_RUN: ${{ inputs.dry_run }}
           BACKFILL: ${{ inputs.backfill }}
           VERBOSE: ${{ inputs.verbose }}

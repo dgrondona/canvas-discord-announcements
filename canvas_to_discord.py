@@ -193,7 +193,7 @@ SAMPLE_HTML = """
 renders properly, the bot is set up correctly.</p>
 <h2>Headings</h2>
 <p>Text can be <strong>bold</strong>, <em>italic</em>, or
-<a href="https://github.com/dgrondona/canvas-discord-announcements">a link</a>.</p>
+<a href="https://github.com/dgrondona/canvas-to-discord">a link</a>.</p>
 <h4>Headings deeper than Discord supports get clamped</h4>
 <ul>
   <li>Bulleted lists</li>

@@ -77,6 +77,7 @@ class Config:
     pattern: re.Pattern
     forum_tags: list[str]
     preview: str
+    preview_lab: str
     backfill: bool
     dry_run: bool
     verbose: bool
@@ -86,8 +87,8 @@ def load_config() -> Config:
     preview = (env("PREVIEW", "") or "").lower()
     if preview in {"off", "none", "false"}:
         preview = ""
-    if preview and preview != "sample":
-        raise ConfigError(f"PREVIEW must be 'sample', got {preview!r}.")
+    if preview and preview not in {"sample", "real"}:
+        raise ConfigError(f"PREVIEW must be 'sample' or 'real', got {preview!r}.")
 
     # A sample preview never calls Canvas, so only the webhook has to be real.
     needs_canvas = preview != "sample"
@@ -110,6 +111,7 @@ def load_config() -> Config:
         pattern=pattern,
         forum_tags=tags,
         preview=preview,
+        preview_lab=(env("PREVIEW_LAB", "") or "").strip(),
         backfill=env_flag("BACKFILL"),
         dry_run=env_flag("DRY_RUN"),
         verbose=env_flag("VERBOSE"),
@@ -433,6 +435,67 @@ def sample_lab(config: Config) -> dict:
     }
 
 
+def pick_preview_lab(session: requests.Session, config: Config) -> dict:
+    """Choose the real assignment to preview.
+
+    PREVIEW_LAB takes a numeric assignment id or part of the name ("Lab 1").
+    Empty picks the earliest-due lab.
+    """
+    labs = fetch_labs(session, config)
+    if not labs:
+        raise ConfigError(
+            "No assignments matched LAB_PATTERN, so there is nothing to preview. "
+            "Check LAB_PATTERN and that the assignments are published."
+        )
+
+    wanted = config.preview_lab
+    if not wanted:
+        return labs[0]
+
+    if wanted.isdigit():
+        for lab in labs:
+            if str(lab["id"]) == wanted:
+                return lab
+
+    matches = [lab for lab in labs if wanted.lower() in (lab.get("name") or "").lower()]
+    if matches:
+        return matches[0]
+
+    # Names are course content, so only spell them out when VERBOSE is on.
+    available = (
+        ", ".join(repr(lab.get("name")) for lab in labs)
+        if config.verbose
+        else ", ".join(str(lab["id"]) for lab in labs)
+    )
+    raise ConfigError(
+        f"No lab matched PREVIEW_LAB={wanted!r}. Available: {available}. "
+        "(Re-run with verbose to see names instead of ids.)"
+    )
+
+
+def print_preview(config: Config, assignment: dict, course_name: str) -> None:
+    """Show what would be posted without posting it."""
+    starter, continuations = render(config, assignment, course_name)
+    messages = [starter["content"], *continuations]
+
+    name = (assignment.get("name") or "")[:DISCORD_THREAD_NAME_LIMIT]
+    if config.verbose:
+        print(f"  thread name: {name!r}")
+    else:
+        # The name is course content, so report only whether it had to be cut.
+        print(f"  thread name: {len(name)} chars (limit {DISCORD_THREAD_NAME_LIMIT})")
+    for field in starter["embeds"][0]["fields"]:
+        print(f"  {field['name']}: {field['value'].replace(chr(10), '  ')}")
+    print(f"  {len(messages)} message(s), longest {max(len(m) for m in messages)} chars (limit 2000)")
+
+    if not config.verbose:
+        print("  (re-run with verbose to print the text itself)")
+        return
+    for index, message in enumerate(messages):
+        print(f"  --- {'starter post' if index == 0 else f'reply {index}'} ---")
+        print(message)
+
+
 # --------------------------------------------------------------------------
 # main
 # --------------------------------------------------------------------------
@@ -451,10 +514,7 @@ def describe(config: Config, assignment: dict) -> str:
 
 def run(config: Config) -> None:
     if config.preview:
-        discord = requests.Session()
-        lab = sample_lab(config)
-        create_thread(discord, config, lab, "Formatting preview")
-        print("Preview thread created. The state file was not touched - delete the thread when done.")
+        run_preview(config)
         return
 
     canvas = canvas_session(config.canvas)
@@ -532,6 +592,32 @@ def run(config: Config) -> None:
         # Persist whatever made it out, so a mid-run failure can't double-post.
         save_state(labs_state)
         print(f"Created {created} thread(s), updated {updated}.")
+
+
+def run_preview(config: Config) -> None:
+    """Render one lab without recording anything.
+
+    Reads no state and writes none, so previewing a lab does not stop the
+    scheduled run from giving that lab its real thread later.
+    """
+    if config.preview == "sample":
+        lab, course_name = sample_lab(config), "Formatting preview"
+    else:
+        canvas = canvas_session(config.canvas)
+        lab = pick_preview_lab(canvas, config)
+        course_name = fetch_course_name(canvas, config.canvas)
+        print(f"Previewing {describe(config, lab)}.")
+
+    if config.dry_run:
+        print_preview(config, lab, course_name)
+        print("DRY_RUN is set - nothing was posted.")
+        return
+
+    create_thread(requests.Session(), config, lab, course_name)
+    print(
+        "Preview thread created - delete it when you're done. The state file was not touched, "
+        "so this lab can still get its real thread later."
+    )
 
 
 def main() -> None:

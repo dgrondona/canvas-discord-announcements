@@ -130,8 +130,26 @@ ones; skipped announcements are named once in the run log and then not reconside
 **Actions → Canvas Announcements → Run workflow**, set **preview**, and the run posts to
 Discord immediately so you can look at the real formatting:
 
-Both workflows have this. `labs.yml` offers only `sample`, which opens a throwaway thread —
-delete it when you're done looking.
+### Lab Threads
+
+**Actions → Lab Threads → Run workflow**, set **preview**:
+
+- **`sample`** — opens a thread for a made-up lab. Needs only `DISCORD_FORUM_WEBHOOK_URL`, so
+  it works before the Canvas secrets are set.
+- **`real`** — opens a thread for an actual assignment from your course. Put the lab in
+  **preview_lab** (a name like `Lab 1`, or the numeric assignment id); leave it empty to take
+  the earliest-due one. This is the way to confirm the bot handles your instructor's real
+  formatting.
+
+Add **dry_run** to either one to print what *would* be posted — thread name length, the due
+date and points, and how many messages the description needs — without creating a thread. Add
+**verbose** on top of that to print the text itself. Without **verbose** nothing that counts
+as course content is logged, since Actions logs are public.
+
+Previews create nothing in the state file, so previewing `Lab 1` does **not** stop it getting
+its real thread later. Delete the throwaway thread when you're done.
+
+### Canvas Announcements
 
 - **`sample`** — posts a made-up announcement that exercises every supported construct:
   headings, bold/italic, nested and numbered lists, links, block quotes, smart punctuation,
