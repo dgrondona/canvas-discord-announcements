@@ -1,21 +1,77 @@
 {
-  "updated_at": "2026-09-12T04:16:24.174729+00:00",
+  "updated_at": "2026-09-13T23:27:34.683000+00:00",
   "labs": {
     "578606": {
-      "state": "seeded",
-      "seen_at": "2026-09-12T04:16:24.174689+00:00"
+      "state": "threaded",
+      "thread_id": "1548837497226661989",
+      "starter_id": "1548837497226661989",
+      "message_ids": [
+        "1548837508396228698",
+        "1548837513467269201",
+        "1548837518437392469"
+      ],
+      "created_at": "2026-09-13T23:27:20.509171+00:00",
+      "fingerprint": "780eaf0af39fea8a81d1c3cfc917b412100b87ca9b485dff9d41dc3192eddd55",
+      "notable": {
+        "name": "Lab 1: Team Contract and Elicitation Plan",
+        "due_at": "2026-09-12T06:59:59Z",
+        "points_possible": 50.0,
+        "unlock_at": null,
+        "lock_at": "2026-09-19T06:59:59Z"
+      }
     },
     "578640": {
-      "state": "seeded",
-      "seen_at": "2026-09-12T04:16:24.174713+00:00"
+      "state": "threaded",
+      "thread_id": "1548837523319693324",
+      "starter_id": "1548837523319693324",
+      "message_ids": [
+        "1548837533771628617"
+      ],
+      "created_at": "2026-09-13T23:27:24.248333+00:00",
+      "fingerprint": "42963336be811609fc5d22fe09304b0038be6d1f7480f81975c3ae15474b9846",
+      "notable": {
+        "name": "Lab 1 Peer- and Self- Assessment",
+        "due_at": "2026-09-21T06:59:59Z",
+        "points_possible": 0.0,
+        "unlock_at": null,
+        "lock_at": "2026-09-21T06:59:59Z"
+      }
     },
     "579517": {
-      "state": "seeded",
-      "seen_at": "2026-09-12T04:16:24.174716+00:00"
+      "state": "threaded",
+      "thread_id": "1548837539165642884",
+      "starter_id": "1548837539165642884",
+      "message_ids": [
+        "1548837549261197372",
+        "1548837554168795196",
+        "1548837559222931526"
+      ],
+      "created_at": "2026-09-13T23:27:30.225246+00:00",
+      "fingerprint": "7db0d520bad9612bcf3298d0bd9b0832b36815ddc452531860c17af0cb09799e",
+      "notable": {
+        "name": "Lab 2: Requirements Analysis",
+        "due_at": "2026-09-26T06:59:59Z",
+        "points_possible": 100.0,
+        "unlock_at": null,
+        "lock_at": "2026-10-03T06:59:59Z"
+      }
     },
     "579525": {
-      "state": "seeded",
-      "seen_at": "2026-09-12T04:16:24.174718+00:00"
+      "state": "threaded",
+      "thread_id": "1548837564163563682",
+      "starter_id": "1548837564163563682",
+      "message_ids": [
+        "1548837573860917380"
+      ],
+      "created_at": "2026-09-13T23:27:33.682496+00:00",
+      "fingerprint": "b3661edd23725764c20873343ab588952f2e52b01c7ab9a877208f3bdc597879",
+      "notable": {
+        "name": "Lab 2 Peer- and Self- Assessment",
+        "due_at": "2026-10-05T06:59:59Z",
+        "points_possible": 0.0,
+        "unlock_at": null,
+        "lock_at": "2026-10-05T06:59:59Z"
+      }
     }
   }
 }
