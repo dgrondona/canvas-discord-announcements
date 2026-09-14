@@ -30,6 +30,7 @@ from common import (
     build_allowed_mentions,
     canvas_session,
     chunk_markdown,
+    GONE,
     delete_discord_message,
     discord_timestamp,
     edit_discord_message,
@@ -75,6 +76,7 @@ class Config:
     webhook: Webhook
     mention: str
     pattern: re.Pattern
+    exclude: re.Pattern | None
     forum_tags: list[str]
     preview: str
     preview_lab: str
@@ -99,6 +101,18 @@ def load_config() -> Config:
     except re.error as exc:
         raise ConfigError(f"LAB_PATTERN is not a valid regular expression ({exc}).") from None
 
+    # Courses often post companion assignments alongside the lab itself - a peer
+    # assessment, a reflection - that match LAB_PATTERN but don't want a thread.
+    raw_exclude = env("LAB_EXCLUDE_PATTERN", "")
+    exclude = None
+    if raw_exclude:
+        try:
+            exclude = re.compile(raw_exclude, re.IGNORECASE)
+        except re.error as exc:
+            raise ConfigError(
+                f"LAB_EXCLUDE_PATTERN is not a valid regular expression ({exc})."
+            ) from None
+
     tags = [tag.strip() for tag in (env("LAB_FORUM_TAGS", "") or "").split(",") if tag.strip()]
     for tag in tags:
         if not tag.isdigit():
@@ -109,6 +123,7 @@ def load_config() -> Config:
         webhook=env_webhook("DISCORD_FORUM_WEBHOOK_URL"),
         mention=env_mention("DISCORD_LAB_MENTION"),
         pattern=pattern,
+        exclude=exclude,
         forum_tags=tags,
         preview=preview,
         preview_lab=(env("PREVIEW_LAB", "") or "").strip(),
@@ -168,10 +183,22 @@ def fetch_labs(session: requests.Session, config: Config) -> list[dict]:
         for assignment in assignments
         if assignment.get("id") is not None
         and assignment.get("published", True)
-        and config.pattern.search(assignment.get("name") or "")
+        and matches_lab(config, assignment.get("name") or "")
     ]
     labs.sort(key=lambda item: (due_time(item) or datetime.max.replace(tzinfo=timezone.utc), item["id"]))
     return labs
+
+
+def matches_lab(config: Config, name: str) -> bool:
+    """Whether an assignment name should get a thread.
+
+    Excluding is deliberately the second step rather than folding everything into
+    one include pattern: an unexpected companion assignment then shows up as an
+    extra thread you can delete, instead of a real lab being silently skipped.
+    """
+    if not config.pattern.search(name):
+        return False
+    return not (config.exclude and config.exclude.search(name))
 
 
 def due_time(assignment: dict) -> datetime | None:
@@ -384,8 +411,12 @@ def update_thread(
     entry: dict,
     assignment: dict,
     course_name: str,
-) -> dict:
-    """Bring an existing thread back in line with the assignment."""
+) -> dict | None:
+    """Bring an existing thread back in line with the assignment.
+
+    Returns None if the thread has been deleted in Discord, so the caller can
+    forget it and let the next run open a fresh one.
+    """
     starter, chunks = render(config, assignment, course_name)
     thread_id = str(entry["thread_id"])
     # Entries written before the starter post and thread were tracked separately
@@ -393,7 +424,10 @@ def update_thread(
     starter_id = str(entry.get("starter_id") or thread_id)
     stored_ids = [str(i) for i in entry.get("message_ids") or []]
 
-    edit_discord_message(session, config.webhook, starter_id, starter, thread_id=thread_id)
+    if edit_discord_message(
+        session, config.webhook, starter_id, starter, thread_id=thread_id
+    ) is GONE:
+        return None
 
     message_ids = list(stored_ids)
     for index, chunk in enumerate(chunks):
@@ -623,7 +657,12 @@ def run(config: Config) -> None:
 
         for entry, lab in to_update:
             changes = describe_changes(entry.get("notable") or {}, notable_of(lab))
-            labs_state[str(lab["id"])] = update_thread(discord, config, entry, lab, course_name)
+            updated_entry = update_thread(discord, config, entry, lab, course_name)
+            if updated_entry is None:
+                labs_state.pop(str(lab["id"]), None)
+                print(f"  thread was deleted in Discord, will be recreated: {describe(config, lab)}")
+                continue
+            labs_state[str(lab["id"])] = updated_entry
             if changes:
                 announce_changes(discord, config, entry["thread_id"], changes)
             updated += 1

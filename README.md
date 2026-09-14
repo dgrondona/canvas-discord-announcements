@@ -60,6 +60,7 @@ Optional repository **variables** (same screen, "Variables" tab):
 | --- | --- |
 | `COURSE_WIDE_ONLY` | `true` to post only course-wide announcements, skipping ones sent to specific sections. Defaults to off. |
 | `LAB_PATTERN` | Which assignments count as labs. A regular expression, case-insensitive, matched against the assignment name. Defaults to `\bLab\b`. |
+| `LAB_EXCLUDE_PATTERN` | Assignments to skip even though they match `LAB_PATTERN` — companion work like peer assessments. Also a case-insensitive regex; empty means skip nothing. |
 | `LAB_FORUM_TAGS` | Comma-separated forum tag ids to apply to new threads. Only needed if the forum requires tags. |
 
 `DISCORD_MENTION` accepts a bare user ID, `<@user-id>`, a role as `<@&role-id>`, or
@@ -76,6 +77,15 @@ an instructor stays inert, because the ping list is built from `DISCORD_MENTION`
 `labs.yml` watches the course's **assignments**, keeps the ones whose name matches
 `LAB_PATTERN` (default: contains the word "Lab"), and gives each one a forum thread you can
 reply under with your work. Unpublished assignments are ignored.
+
+Courses often post companion work next to the lab itself — `Lab 2 Peer- and Self- Assessment`
+alongside `Lab 2: Requirements Analysis` — which matches "Lab" but shouldn't get its own
+thread. Set the `LAB_EXCLUDE_PATTERN` variable to drop those, e.g. `peer|self|assessment`.
+
+Excluding is a separate step from matching on purpose. Narrowing `LAB_PATTERN` instead (say,
+requiring a colon) would silently skip a real lab that happens to be named differently,
+whereas an unexpected companion assignment just shows up as one extra thread you can delete.
+Fail loud, not silent.
 
 The thread's **first post is just the information card** — due date, points, submission types,
 and a link back to Canvas. Due dates render as Discord timestamps, so everyone sees them in
@@ -105,6 +115,10 @@ also says what changed:
 
 An instructor fixing a typo in the description edits silently instead, so the thread doesn't
 nag about nothing.
+
+If you delete a thread in Discord, the next run notices it's gone and opens a fresh one
+rather than failing. So deleting a thread is a way to force it to be rebuilt — and if you
+want a thread gone for good, exclude the assignment as well as deleting it.
 
 One limit: a webhook can't rename an existing forum thread, so if the assignment's title
 changes, the thread keeps its original name. The card's title and the change reply both show

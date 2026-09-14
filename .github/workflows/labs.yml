@@ -68,6 +68,7 @@ jobs:
           DISCORD_FORUM_WEBHOOK_URL: ${{ secrets.DISCORD_FORUM_WEBHOOK_URL }}
           DISCORD_LAB_MENTION: ${{ secrets.DISCORD_LAB_MENTION || vars.DISCORD_LAB_MENTION }}
           LAB_PATTERN: ${{ vars.LAB_PATTERN }}
+          LAB_EXCLUDE_PATTERN: ${{ vars.LAB_EXCLUDE_PATTERN }}
           LAB_FORUM_TAGS: ${{ vars.LAB_FORUM_TAGS }}
           PREVIEW: ${{ inputs.preview }}
           PREVIEW_LAB: ${{ inputs.preview_lab }}

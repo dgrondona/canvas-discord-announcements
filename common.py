@@ -38,6 +38,17 @@ class ConfigError(Exception):
     """Something about the environment is wrong and no run can succeed."""
 
 
+class _Gone:
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "GONE"
+
+
+# Returned when an edit or delete targets something that no longer exists -
+# someone deleted the message or thread in Discord. Distinct from a broken
+# webhook, which stays a hard ConfigError.
+GONE = _Gone()
+
+
 # --------------------------------------------------------------------------
 # configuration
 # --------------------------------------------------------------------------
@@ -299,7 +310,8 @@ def _discord_request(
     webhook: Webhook,
     payload: dict | None = None,
     params: dict | None = None,
-) -> dict | None:
+    missing_ok: bool = False,
+):
     """Send one webhook call, handling 429s and mapping failures to clear errors."""
     for _ in range(5):
         # DELETE carries no body, and Discord is happier without an empty one.
@@ -316,6 +328,8 @@ def _discord_request(
             time.sleep(wait)
             continue
 
+        if response.status_code == 404 and missing_ok:
+            return GONE
         if response.status_code in (401, 403, 404):
             raise ConfigError(
                 f"Discord rejected the webhook ({response.status_code}) - {webhook.env_name} "
@@ -366,10 +380,13 @@ def edit_discord_message(
     *,
     thread_id: str | None = None,
 ) -> dict | None:
-    """Edit a message this webhook previously sent."""
+    """Edit a message this webhook previously sent.
+
+    Returns GONE if the message or its thread has been deleted.
+    """
     params = {"thread_id": thread_id} if thread_id else None
     url = f"{webhook.url.rstrip('/')}/messages/{message_id}"
-    return _discord_request(session, "PATCH", url, webhook, payload, params)
+    return _discord_request(session, "PATCH", url, webhook, payload, params, missing_ok=True)
 
 
 def delete_discord_message(
@@ -379,10 +396,13 @@ def delete_discord_message(
     *,
     thread_id: str | None = None,
 ) -> None:
-    """Delete a message this webhook previously sent."""
+    """Delete a message this webhook previously sent.
+
+    A message that is already gone is not an error - the end state is the same.
+    """
     params = {"thread_id": thread_id} if thread_id else None
     url = f"{webhook.url.rstrip('/')}/messages/{message_id}"
-    _discord_request(session, "DELETE", url, webhook, None, params)
+    _discord_request(session, "DELETE", url, webhook, None, params, missing_ok=True)
 
 
 # --------------------------------------------------------------------------
